@@ -18,15 +18,9 @@ export interface TodoAppEc2StackProps extends cdk.StackProps {
   certificateArn?: string;
 }
 
-/** Helper to get existing key pair or undefined */
-function getKeyPair(scope: Construct, keyPairName?: string): ec2.IKeyPair | undefined {
-  if (!keyPairName) return undefined;
-  return ec2.KeyPair.fromKeyPairName(scope, 'ExistingKeyPair', keyPairName);
-}
-
 export class TodoAppEc2Stack extends cdk.Stack {
-  public readonly vpc: ec2.Vpc;
-  public readonly instance: ec2.Instance;
+  public readonly vpcId: string;
+  public readonly instanceId: string;
   public readonly securityGroup: ec2.SecurityGroup;
 
   constructor(scope: Construct, id: string, props: TodoAppEc2StackProps = {}) {
@@ -40,32 +34,134 @@ export class TodoAppEc2Stack extends cdk.Stack {
       certificateArn,
     } = props;
 
-    // Resolve key pair for modern CDK API
-    const keyPair = getKeyPair(this, keyPairName);
-
-    // ─── VPC ───────────────────────────────────────────────────────────────
-    this.vpc = new ec2.Vpc(this, 'Vpc', {
-      maxAzs: 2,
-      natGateways: 1,
-      subnetConfiguration: [
-        {
-          name: 'public',
-          subnetType: ec2.SubnetType.PUBLIC,
-          cidrMask: 24,
-        },
-        {
-          name: 'private',
-          subnetType: ec2.SubnetType.PRIVATE_WITH_EGRESS,
-          cidrMask: 24,
-        },
-      ],
+    // ─── VPC (L1 constructs - no AWS calls at synth) ─────────────────────────
+    const vpc = new ec2.CfnVPC(this, 'Vpc', {
+      cidrBlock: '10.0.0.0/16',
       enableDnsHostnames: true,
       enableDnsSupport: true,
+      tags: [
+        { key: 'Name', value: 'TodoAppEc2Stack/Vpc' },
+        { key: 'Project', value: 'TodoApp' },
+        { key: 'Environment', value: 'production' },
+        { key: 'ManagedBy', value: 'CDK' },
+      ],
+    });
+    this.vpcId = vpc.ref;
+
+    // Internet Gateway
+    const igw = new ec2.CfnInternetGateway(this, 'IGW', {
+      tags: [{ key: 'Name', value: 'TodoAppEc2Stack/Vpc' }],
+    });
+    new ec2.CfnVPCGatewayAttachment(this, 'IGWAttach', {
+      vpcId: vpc.ref,
+      internetGatewayId: igw.ref,
     });
 
-    // ─── Security Group ───────────────────────────────────────────────────
+    // Public Subnets (2 AZs)
+    const publicSubnet1 = new ec2.CfnSubnet(this, 'PublicSubnet1', {
+      vpcId: vpc.ref,
+      cidrBlock: '10.0.0.0/24',
+      availabilityZone: 'us-east-1a',
+      mapPublicIpOnLaunch: true,
+      tags: [
+        { key: 'aws-cdk:subnet-name', value: 'public' },
+        { key: 'aws-cdk:subnet-type', value: 'Public' },
+        { key: 'Name', value: 'TodoAppEc2Stack/Vpc/publicSubnet1' },
+      ],
+    });
+    const publicSubnet2 = new ec2.CfnSubnet(this, 'PublicSubnet2', {
+      vpcId: vpc.ref,
+      cidrBlock: '10.0.1.0/24',
+      availabilityZone: 'us-east-1b',
+      mapPublicIpOnLaunch: true,
+      tags: [
+        { key: 'aws-cdk:subnet-name', value: 'public' },
+        { key: 'aws-cdk:subnet-type', value: 'Public' },
+        { key: 'Name', value: 'TodoAppEc2Stack/Vpc/publicSubnet2' },
+      ],
+    });
+
+    // Private Subnets (2 AZs)
+    const privateSubnet1 = new ec2.CfnSubnet(this, 'PrivateSubnet1', {
+      vpcId: vpc.ref,
+      cidrBlock: '10.0.2.0/24',
+      availabilityZone: 'us-east-1a',
+      mapPublicIpOnLaunch: false,
+      tags: [
+        { key: 'aws-cdk:subnet-name', value: 'private' },
+        { key: 'aws-cdk:subnet-type', value: 'Private' },
+        { key: 'Name', value: 'TodoAppEc2Stack/Vpc/privateSubnet1' },
+      ],
+    });
+    const privateSubnet2 = new ec2.CfnSubnet(this, 'PrivateSubnet2', {
+      vpcId: vpc.ref,
+      cidrBlock: '10.0.3.0/24',
+      availabilityZone: 'us-east-1b',
+      mapPublicIpOnLaunch: false,
+      tags: [
+        { key: 'aws-cdk:subnet-name', value: 'private' },
+        { key: 'aws-cdk:subnet-type', value: 'Private' },
+        { key: 'Name', value: 'TodoAppEc2Stack/Vpc/privateSubnet2' },
+      ],
+    });
+
+    // NAT Gateway (in public subnet 1)
+    const natEip = new ec2.CfnEIP(this, 'NatEIP', {
+      domain: 'vpc',
+      tags: [{ key: 'Name', value: 'TodoAppEc2Stack/Vpc/publicSubnet1' }],
+    });
+    const natGateway = new ec2.CfnNatGateway(this, 'NatGateway', {
+      allocationId: natEip.attrAllocationId,
+      subnetId: publicSubnet1.ref,
+      tags: [{ key: 'Name', value: 'TodoAppEc2Stack/Vpc/publicSubnet1' }],
+    });
+
+    // Public Route Table
+    const publicRouteTable = new ec2.CfnRouteTable(this, 'PublicRouteTable', {
+      vpcId: vpc.ref,
+      tags: [{ key: 'Name', value: 'TodoAppEc2Stack/Vpc/publicSubnet1' }],
+    });
+    new ec2.CfnRoute(this, 'PublicDefaultRoute', {
+      routeTableId: publicRouteTable.ref,
+      destinationCidrBlock: '0.0.0.0/0',
+      gatewayId: igw.ref,
+    });
+    new ec2.CfnSubnetRouteTableAssociation(this, 'PublicSubnet1RTAssoc', {
+      routeTableId: publicRouteTable.ref,
+      subnetId: publicSubnet1.ref,
+    });
+    new ec2.CfnSubnetRouteTableAssociation(this, 'PublicSubnet2RTAssoc', {
+      routeTableId: publicRouteTable.ref,
+      subnetId: publicSubnet2.ref,
+    });
+
+    // Private Route Table (via NAT)
+    const privateRouteTable = new ec2.CfnRouteTable(this, 'PrivateRouteTable', {
+      vpcId: vpc.ref,
+      tags: [{ key: 'Name', value: 'TodoAppEc2Stack/Vpc/privateSubnet1' }],
+    });
+    new ec2.CfnRoute(this, 'PrivateDefaultRoute', {
+      routeTableId: privateRouteTable.ref,
+      destinationCidrBlock: '0.0.0.0/0',
+      natGatewayId: natGateway.ref,
+    });
+    new ec2.CfnSubnetRouteTableAssociation(this, 'PrivateSubnet1RTAssoc', {
+      routeTableId: privateRouteTable.ref,
+      subnetId: privateSubnet1.ref,
+    });
+    new ec2.CfnSubnetRouteTableAssociation(this, 'PrivateSubnet2RTAssoc', {
+      routeTableId: privateRouteTable.ref,
+      subnetId: privateSubnet2.ref,
+    });
+
+    // ─── Security Group ───────────────────────────────────────────────────────
     this.securityGroup = new ec2.SecurityGroup(this, 'InstanceSG', {
-      vpc: this.vpc,
+      vpc: ec2.Vpc.fromVpcAttributes(this, 'VpcRef', {
+        vpcId: vpc.ref,
+        availabilityZones: ['us-east-1a', 'us-east-1b'],
+        publicSubnetIds: [publicSubnet1.ref, publicSubnet2.ref],
+        privateSubnetIds: [privateSubnet1.ref, privateSubnet2.ref],
+      }),
       description: 'Security group for Todo App EC2 instance',
       allowAllOutbound: true,
     });
@@ -93,7 +189,7 @@ export class TodoAppEc2Stack extends cdk.Stack {
       );
     }
 
-    // ─── IAM Role for EC2 ─────────────────────────────────────────────────
+    // ─── IAM Role for EC2 ─────────────────────────────────────────────────────
     const instanceRole = new iam.Role(this, 'InstanceRole', {
       assumedBy: new iam.ServicePrincipal('ec2.amazonaws.com'),
       managedPolicies: [
@@ -117,11 +213,11 @@ export class TodoAppEc2Stack extends cdk.Stack {
     instanceRole.addToPolicy(new iam.PolicyStatement({
       actions: ['ssm:GetParameter', 'ssm:GetParameters'],
       resources: [
-        `arn:aws:ssm:${this.region}:${this.account}:parameter/todo-app/*`,
+        `arn:aws:ssm:${cdk.Aws.REGION}:${cdk.Aws.ACCOUNT_ID}:parameter/todo-app/*`,
       ],
     }));
 
-    // ─── Secrets Manager for DB credentials ───────────────────────────────
+    // ─── Secrets Manager for DB credentials ───────────────────────────────────
     const dbSecret = new secretsmanager.Secret(this, 'DbSecret', {
       description: 'PostgreSQL credentials for Todo App',
       generateSecretString: {
@@ -133,7 +229,7 @@ export class TodoAppEc2Stack extends cdk.Stack {
       removalPolicy: cdk.RemovalPolicy.DESTROY,
     });
 
-    // ─── SSM Parameters for app config ────────────────────────────────────
+    // ─── SSM Parameters for app config ────────────────────────────────────────
     new ssm.StringParameter(this, 'DbNameParam', {
       parameterName: '/todo-app/db-name',
       stringValue: 'todo_app_aws_ec2_db',
@@ -152,7 +248,7 @@ export class TodoAppEc2Stack extends cdk.Stack {
       description: 'React app API URL',
     });
 
-    // ─── User Data Script ─────────────────────────────────────────────────
+    // ─── User Data Script ─────────────────────────────────────────────────────
     const userData = ec2.UserData.forLinux();
     userData.addCommands(
       '#!/bin/bash',
@@ -228,50 +324,57 @@ export class TodoAppEc2Stack extends cdk.Stack {
       'EOF'
     );
 
-    // ─── EC2 Instance ─────────────────────────────────────────────────────
-    this.instance = new ec2.Instance(this, 'Instance', {
-      vpc: this.vpc,
-      instanceType,
-      machineImage: ec2.MachineImage.latestAmazonLinux2023(),
-      securityGroup: this.securityGroup,
-      role: instanceRole,
-      userData,
-      keyPair: keyPair,
-      vpcSubnets: {
-        subnetType: ec2.SubnetType.PUBLIC,
-      },
-      blockDevices: [
+    // ─── EC2 Instance (L1 - no IVpc dependency) ──────────────────────────────
+    const instance = new ec2.CfnInstance(this, 'Instance', {
+      instanceType: instanceType.toString(),
+      imageId: new ec2.AmazonLinuxImage({
+        generation: ec2.AmazonLinuxGeneration.AMAZON_LINUX_2023,
+      }).getImage(this).imageId,
+      securityGroupIds: [this.securityGroup.securityGroupId],
+      iamInstanceProfile: instanceRole.roleName,
+      userData: cdk.Fn.base64(userData.render()),
+      keyName: keyPairName,
+      subnetId: publicSubnet1.ref,
+      blockDeviceMappings: [
         {
           deviceName: '/dev/xvda',
-          volume: ec2.BlockDeviceVolume.ebs(20, {
-            volumeType: ec2.EbsDeviceVolumeType.GP3,
+          ebs: {
+            volumeSize: 20,
+            volumeType: 'gp3',
             encrypted: true,
             deleteOnTermination: true,
-          }),
+          },
         },
       ],
+      tags: [
+        { key: 'Name', value: 'TodoAppEc2Stack/Instance' },
+        { key: 'Project', value: 'TodoApp' },
+        { key: 'Environment', value: 'production' },
+        { key: 'ManagedBy', value: 'CDK' },
+      ],
     });
+    this.instanceId = instance.ref;
 
-    // ─── Elastic IP (optional, for stable public IP) ──────────────────────
+    // ─── Elastic IP (optional, for stable public IP) ──────────────────────────
     const eip = new ec2.CfnEIP(this, 'InstanceEIP', {
       domain: 'vpc',
-      instanceId: this.instance.instanceId,
+      instanceId: instance.ref,
       tags: [{ key: 'Name', value: 'TodoApp-EIP' }],
     });
 
-    // ─── Outputs ──────────────────────────────────────────────────────────
+    // ─── Outputs ──────────────────────────────────────────────────────────────
     new cdk.CfnOutput(this, 'InstanceId', {
-      value: this.instance.instanceId,
+      value: instance.ref,
       description: 'EC2 Instance ID',
     });
 
     new cdk.CfnOutput(this, 'InstancePublicIp', {
-      value: this.instance.instancePublicIp,
+      value: instance.attrPublicIp,
       description: 'EC2 Instance Public IP',
     });
 
     new cdk.CfnOutput(this, 'InstancePublicDns', {
-      value: this.instance.instancePublicDnsName,
+      value: instance.attrPublicDnsName,
       description: 'EC2 Instance Public DNS',
     });
 
@@ -281,7 +384,7 @@ export class TodoAppEc2Stack extends cdk.Stack {
     });
 
     new cdk.CfnOutput(this, 'SshCommand', {
-      value: `ssh -i ~/.ssh/${keyPairName || 'your-key'}.pem ec2-user@${this.instance.instancePublicDnsName}`,
+      value: `ssh -i ~/.ssh/${keyPairName || 'your-key'}.pem ec2-user@${instance.attrPublicDnsName}`,
       description: 'SSH command to connect to the instance',
     });
 
@@ -291,11 +394,11 @@ export class TodoAppEc2Stack extends cdk.Stack {
     });
 
     new cdk.CfnOutput(this, 'VpcId', {
-      value: this.vpc.vpcId,
+      value: vpc.ref,
       description: 'VPC ID',
     });
 
-    // ─── Tags ─────────────────────────────────────────────────────────────
+    // ─── Tags ─────────────────────────────────────────────────────────────────
     cdk.Tags.of(this).add('Project', 'TodoApp');
     cdk.Tags.of(this).add('Environment', 'production');
     cdk.Tags.of(this).add('ManagedBy', 'CDK');
