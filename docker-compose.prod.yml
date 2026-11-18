@@ -25,9 +25,7 @@ services:
       - backend_network
 
   backend:
-    build:
-      context: ./backend
-      dockerfile: Dockerfile.prod
+    image: public.ecr.aws/${ECR_REPOSITORY:-hoanganh-p}/todo-app-backend:latest
 
     container_name: todo-app-aws-ec2-backend
     restart: unless-stopped
@@ -53,11 +51,7 @@ services:
       - backend_network
 
   frontend:
-    build:
-      context: ./frontend
-      dockerfile: Dockerfile.prod
-      args:
-        REACT_APP_API_URL: /api
+    image: public.ecr.aws/${ECR_REPOSITORY:-hoanganh-p}/todo-app-frontend:latest
 
     container_name: todo-app-aws-ec2-frontend
     restart: unless-stopped

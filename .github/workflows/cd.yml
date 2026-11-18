@@ -109,6 +109,7 @@ jobs:
           host: ${{ steps.get-ip.outputs.public_ip }}
           username: ec2-user
           key: ${{ secrets.EC2_SSH_PRIVATE_KEY }}
+          envs: ECR_REPOSITORY
           script: |
             cd /opt/todo-app
             git pull origin main || echo "First deploy, skipping git pull"
@@ -117,6 +118,7 @@ jobs:
             export DB_NAME=todo_app_aws_ec2_db
             export DB_PASSWORD=${{ steps.get-secret.outputs.db_password }}
             export REACT_APP_API_URL=/api
+            export ECR_REPOSITORY=${{ vars.ECR_REPOSITORY }}
 
             docker compose -f docker-compose.prod.yml pull
             docker compose -f docker-compose.prod.yml up -d --remove-orphans
