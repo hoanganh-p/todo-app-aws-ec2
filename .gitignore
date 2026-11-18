@@ -14,9 +14,20 @@ frontend/coverage/
 frontend/.env.local
 frontend/.env.*.local
 
+# Infrastructure (CDK)
+infrastructure/node_modules/
+infrastructure/dist/
+infrastructure/cdk.out/
+infrastructure/.aws-sam/
+infrastructure/cdk.context.json
+
 # Logs
 *.log
 npm-debug.log*
+
+# Docker
+docker-compose.override.yml
+.docker/
 
 # Editor / OS / Tools
 .vscode/
@@ -26,3 +37,12 @@ Thumbs.db
 prompt-crud.md
 prompt-project.md
 .codex
+
+# Test / Coverage
+coverage/
+.nyc_output/
+
+# OS
+*.swp
+*.swo
+*~

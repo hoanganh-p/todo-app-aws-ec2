@@ -3,8 +3,8 @@ package main
 import (
 	"log"
 	"os"
-	"todo-backend/database"
-	"todo-backend/handlers"
+	"todo-app-aws-ec2-backend/database"
+	"todo-app-aws-ec2-backend/handlers"
 
 	"github.com/gin-gonic/gin"
 )

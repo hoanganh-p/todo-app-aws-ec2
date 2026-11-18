@@ -1,6 +1,6 @@
 {
   "$schema": "https://json.schemastore.org/package",
-  "name": "todo-frontend",
+  "name": "todo-app-aws-ec2-frontend",
   "version": "0.1.0",
   "private": true,
   "dependencies": {

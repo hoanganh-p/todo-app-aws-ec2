@@ -5,7 +5,7 @@ import (
 	"log"
 	"os"
 	"time"
-	"todo-backend/models"
+	"todo-app-aws-ec2-backend/models"
 
 	"gorm.io/driver/postgres"
 	"gorm.io/gorm"

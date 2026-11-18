@@ -1,4 +1,4 @@
-module todo-backend
+module todo-app-aws-ec2-backend
 
 go 1.24
 

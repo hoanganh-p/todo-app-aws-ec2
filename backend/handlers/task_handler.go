@@ -3,8 +3,8 @@ package handlers
 import (
 	"net/http"
 	"strconv"
-	"todo-backend/database"
-	"todo-backend/models"
+	"todo-app-aws-ec2-backend/database"
+	"todo-app-aws-ec2-backend/models"
 
 	"github.com/gin-gonic/gin"
 )

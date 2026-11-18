@@ -1,0 +1,137 @@
+name: CD - Deploy to AWS
+
+on:
+  workflow_run:
+    workflows: ["CI - Build & Test"]
+    types:
+      - completed
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: 'Environment to deploy'
+        required: true
+        default: 'production'
+        type: choice
+        options:
+          - production
+          - staging
+
+permissions:
+  id-token: write
+  contents: read
+
+env:
+  AWS_REGION: us-east-1
+  CDK_VERSION: '2.1148.1'
+
+jobs:
+  deploy-infrastructure:
+    name: Deploy Infrastructure (CDK)
+    if: ${{ github.event.workflow_run.conclusion == 'success' || github.event_name == 'workflow_dispatch' }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: arn:aws:iam::262232992721:role/GitHubActionsDeployRole
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: infrastructure/package-lock.json
+
+      - name: Install CDK dependencies
+        working-directory: ./infrastructure
+        run: npm ci
+
+      - name: Build TypeScript
+        working-directory: ./infrastructure
+        run: npm run build
+
+      - name: CDK Diff
+        working-directory: ./infrastructure
+        run: npx cdk diff --strict
+
+      - name: CDK Deploy
+        working-directory: ./infrastructure
+        run: npx cdk deploy --require-approval never --strict
+        env:
+          CDK_DEFAULT_ACCOUNT: 262232992721
+          CDK_DEFAULT_REGION: us-east-1
+
+  deploy-application:
+    name: Deploy Application to EC2
+    needs: deploy-infrastructure
+    if: ${{ github.event.workflow_run.conclusion == 'success' || github.event_name == 'workflow_dispatch' }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: arn:aws:iam::262232992721:role/GitHubActionsDeployRole
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Get EC2 Instance Public IP
+        id: get-ip
+        run: |
+          INSTANCE_ID=$(aws ec2 describe-instances \
+            --filters "Name=tag:Name,Values=TodoApp*" "Name=instance-state-name,Values=running" \
+            --query "Reservations[0].Instances[0].InstanceId" --output text)
+          PUBLIC_IP=$(aws ec2 describe-instances \
+            --instance-ids $INSTANCE_ID \
+            --query "Reservations[0].Instances[0].PublicIpAddress" --output text)
+          echo "instance_id=$INSTANCE_ID" >> $GITHUB_OUTPUT
+          echo "public_ip=$PUBLIC_IP" >> $GITHUB_OUTPUT
+
+      - name: Get Database Password from Secrets Manager
+        id: get-secret
+        run: |
+          SECRET_ARN=$(aws secretsmanager list-secrets \
+            --filters Key=name,Values=TodoAppEc2Stack/DbSecret \
+            --query "SecretList[0].ARN" --output text)
+          DB_PASSWORD=$(aws secretsmanager get-secret-value \
+            --secret-id $SECRET_ARN --query SecretString --output text | jq -r .password)
+          echo "db_password=$DB_PASSWORD" >> $GITHUB_OUTPUT
+
+      - name: Deploy via SSH
+        uses: appleboy/ssh-action@v1
+        with:
+          host: ${{ steps.get-ip.outputs.public_ip }}
+          username: ec2-user
+          key: ${{ secrets.EC2_SSH_PRIVATE_KEY }}
+          script: |
+            cd /opt/todo-app
+            git pull origin main || echo "First deploy, skipping git pull"
+
+            export DB_USER=todo_user
+            export DB_NAME=todo_app_aws_ec2_db
+            export DB_PASSWORD=${{ steps.get-secret.outputs.db_password }}
+            export REACT_APP_API_URL=/api
+
+            docker compose -f docker-compose.prod.yml pull
+            docker compose -f docker-compose.prod.yml up -d --remove-orphans
+
+            # Wait for health checks
+            sleep 10
+            docker compose -f docker-compose.prod.yml ps
+
+            # Health check
+            curl -f http://localhost/ || exit 1
+            curl -f http://localhost/api/tasks || exit 1
+
+      - name: Post-deployment verification
+        run: |
+          sleep 5
+          curl -f http://${{ steps.get-ip.outputs.public_ip }}/ || exit 1
+          curl -f http://${{ steps.get-ip.outputs.public_ip }}/api/tasks || exit 1
+          echo "Deployment successful!"
