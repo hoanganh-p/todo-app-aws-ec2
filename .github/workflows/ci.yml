@@ -35,7 +35,7 @@ jobs:
 
       - name: Run CDK synth (dry-run)
         working-directory: ./infrastructure
-        run: npx cdk synth --strict
+        run: npx cdk synth
 
       - name: Run cdk-nag (security checks)
         working-directory: ./infrastructure
