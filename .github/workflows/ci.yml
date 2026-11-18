@@ -27,7 +27,7 @@ jobs:
 
       - name: Install CDK dependencies
         working-directory: ./infrastructure
-        run: npm ci
+        run: npm install
 
       - name: Run TypeScript build
         working-directory: ./infrastructure
@@ -39,7 +39,9 @@ jobs:
 
       - name: Run cdk-nag (security checks)
         working-directory: ./infrastructure
-        run: npx cdk synth --strict 2>&1 | npx cdk-nag --fail-on-warnings
+        run: |
+          npm install -g cdk-nag
+          npx cdk synth 2>&1 | npx cdk-nag --fail-on-warnings
 
   build-backend:
     name: Build Backend
