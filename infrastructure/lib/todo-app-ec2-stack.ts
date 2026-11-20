@@ -198,6 +198,11 @@ export class TodoAppEc2Stack extends cdk.Stack {
       ],
     });
 
+    // Instance Profile (required for L1 CfnInstance)
+    const instanceProfile = new iam.CfnInstanceProfile(this, 'InstanceProfile', {
+      roles: [instanceRole.roleName],
+    });
+
     // Permissions to read secrets from Secrets Manager
     instanceRole.addToPolicy(new iam.PolicyStatement({
       actions: ['secretsmanager:GetSecretValue'],
@@ -331,7 +336,7 @@ export class TodoAppEc2Stack extends cdk.Stack {
         generation: ec2.AmazonLinuxGeneration.AMAZON_LINUX_2023,
       }).getImage(this).imageId,
       securityGroupIds: [this.securityGroup.securityGroupId],
-      iamInstanceProfile: instanceRole.roleName,
+      iamInstanceProfile: instanceProfile.ref,
       userData: cdk.Fn.base64(userData.render()),
       keyName: keyPairName,
       subnetId: publicSubnet1.ref,
