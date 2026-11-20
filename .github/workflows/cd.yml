@@ -105,7 +105,7 @@ jobs:
         id: get-secret
         run: |
           SECRET_ARN=$(aws secretsmanager list-secrets \
-            --filters Key=name,Values=TodoAppEc2Stack/DbSecret \
+            --filters Key=name,Values=DbSecret \
             --query "SecretList[0].ARN" --output text)
           DB_PASSWORD=$(aws secretsmanager get-secret-value \
             --secret-id $SECRET_ARN --query SecretString --output text | jq -r .password)
