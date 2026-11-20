@@ -49,11 +49,15 @@ jobs:
 
       - name: Install CDK dependencies
         working-directory: ./infrastructure
-        run: npm ci
+        run: npm install --prefer-offline --no-audit
 
       - name: Build TypeScript
         working-directory: ./infrastructure
         run: npm run build
+
+      - name: CDK Bootstrap
+        working-directory: ./infrastructure
+        run: npx cdk bootstrap --cloudformation-execution-policies arn:aws:iam::262232992721:policy/AdministratorAccess
 
       - name: CDK Diff
         working-directory: ./infrastructure
