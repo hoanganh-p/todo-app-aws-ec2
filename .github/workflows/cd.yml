@@ -119,6 +119,9 @@ jobs:
           key: ${{ secrets.EC2_SSH_PRIVATE_KEY }}
           envs: ECR_REPOSITORY
           script: |
+            # Fix ownership of app directory
+            sudo chown -R ec2-user:ec2-user /opt/todo-app
+
             cd /opt/todo-app
             # Clone repo on first deploy
             if [ ! -d .git ]; then
@@ -127,8 +130,8 @@ jobs:
               git pull origin main
             fi
 
-            # Write password to file to avoid special char issues
-            printf '%s\n' '${{ steps.get-secret.outputs.db_password }}' > /tmp/db_password.txt
+            # Write password to file using printf (handles special chars)
+            printf '%s\n' "${{ steps.get-secret.outputs.db_password }}" > /tmp/db_password.txt
             export DB_USER=todo_user
             export DB_NAME=todo_app_aws_ec2_db
             export DB_PASSWORD=$(cat /tmp/db_password.txt)
