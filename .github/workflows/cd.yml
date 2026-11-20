@@ -69,6 +69,7 @@ jobs:
         env:
           CDK_DEFAULT_ACCOUNT: 262232992721
           CDK_DEFAULT_REGION: us-east-1
+          KEY_PAIR_NAME: ${{ vars.KEY_PAIR_NAME }}
 
   deploy-application:
     name: Deploy Application to EC2

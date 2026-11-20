@@ -11,4 +11,5 @@ new TodoAppEc2Stack(app, 'TodoAppEc2Stack', {
     region: process.env.CDK_DEFAULT_REGION || 'us-east-1',
   },
   description: 'Todo App Infrastructure - EC2 with Docker Compose, Nginx, PostgreSQL',
+  keyPairName: process.env.KEY_PAIR_NAME,
 });
