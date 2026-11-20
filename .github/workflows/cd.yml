@@ -57,7 +57,7 @@ jobs:
 
       - name: CDK Diff
         working-directory: ./infrastructure
-        run: npx cdk diff --strict
+        run: npx cdk diff
 
       - name: CDK Deploy
         working-directory: ./infrastructure
