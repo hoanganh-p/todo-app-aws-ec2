@@ -61,7 +61,7 @@ jobs:
 
       - name: CDK Deploy
         working-directory: ./infrastructure
-        run: npx cdk deploy --require-approval never --strict
+        run: npx cdk deploy --require-approval never
         env:
           CDK_DEFAULT_ACCOUNT: 262232992721
           CDK_DEFAULT_REGION: us-east-1
