@@ -14,12 +14,13 @@ frontend/coverage/
 frontend/.env.local
 frontend/.env.*.local
 
-# Infrastructure (CDK)
-infrastructure/node_modules/
-infrastructure/dist/
-infrastructure/cdk.out/
-infrastructure/.aws-sam/
-infrastructure/cdk.context.json
+# Terraform
+.terraform/
+*.tfstate
+*.tfstate.*
+*.tfvars
+*.tfvars.json
+terraform.tfvars
 
 # Logs
 *.log

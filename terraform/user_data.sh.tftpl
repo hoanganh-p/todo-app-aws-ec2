@@ -1,0 +1,167 @@
+#!/bin/bash
+set -euo pipefail
+
+# Redirect output to CloudWatch and console
+exec > >(tee /var/log/user-data.log | logger -t user-data -s 2>/dev/console) 2>&1
+
+echo "=== Starting user-data script at $(date) ==="
+
+# Update packages
+dnf update -y
+
+# Install required packages first (unzip needed for AWS CLI install)
+dnf install -y unzip
+
+# Install Docker
+dnf install -y docker
+systemctl enable --now docker
+usermod -aG docker ec2-user
+
+# Install Docker Compose (v2 plugin)
+mkdir -p /usr/local/lib/docker/cli-plugins
+curl -SL "https://github.com/docker/compose/releases/download/v2.27.0/docker-compose-linux-x86_64" -o /usr/local/lib/docker/cli-plugins/docker-compose
+chmod +x /usr/local/lib/docker/cli-plugins/docker-compose
+
+# Install AWS CLI v2
+curl "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o "awscliv2.zip"
+unzip -o awscliv2.zip
+./aws/install
+
+# Install CloudWatch Agent
+dnf install -y amazon-cloudwatch-agent
+
+# Install git
+dnf install -y git
+
+# Install jq
+dnf install -y jq
+
+# Create app directory
+mkdir -p /opt/todo-app
+chown ec2-user:ec2-user /opt/todo-app
+
+# Create CloudWatch Agent configuration
+cat > /opt/aws/amazon-cloudwatch-agent/etc/amazon-cloudwatch-agent.json <<'CWAGENTEOF'
+{
+  "metrics": {
+    "namespace": "TodoApp/EC2",
+    "metrics_collected": {
+      "cpu": {
+        "measurement": ["cpu_usage_idle", "cpu_usage_user", "cpu_usage_system"],
+        "metrics_collection_interval": 60,
+        "resources": ["*"]
+      },
+      "disk": {
+        "measurement": ["used_percent"],
+        "metrics_collection_interval": 60,
+        "resources": ["/"]
+      },
+      "diskio": {
+        "measurement": ["reads", "writes", "read_bytes", "write_bytes"],
+        "metrics_collection_interval": 60,
+        "resources": ["*"]
+      },
+      "mem": {
+        "measurement": ["mem_used_percent"],
+        "metrics_collection_interval": 60
+      },
+      "netstat": {
+        "measurement": ["tcp_established", "tcp_time_wait"],
+        "metrics_collection_interval": 60
+      },
+      "swap": {
+        "measurement": ["swap_used_percent"],
+        "metrics_collection_interval": 60
+      }
+    }
+  },
+  "logs": {
+    "logs_collected": {
+      "files": {
+        "collect_list": [
+          {
+            "file_path": "/var/log/user-data.log",
+            "log_group_name": "/aws/ec2/todo-app/user-data",
+            "log_stream_name": "{instance_id}"
+          },
+          {
+            "file_path": "/opt/todo-app/docker-compose.log",
+            "log_group_name": "/aws/ec2/todo-app/docker-compose",
+            "log_stream_name": "{instance_id}"
+          },
+          {
+            "file_path": "/var/log/nginx/access.log",
+            "log_group_name": "/aws/ec2/todo-app/nginx-access",
+            "log_stream_name": "{instance_id}"
+          },
+          {
+            "file_path": "/var/log/nginx/error.log",
+            "log_group_name": "/aws/ec2/todo-app/nginx-error",
+            "log_stream_name": "{instance_id}"
+          }
+        ]
+      }
+    }
+  }
+}
+CWAGENTEOF
+
+# Start CloudWatch Agent
+/opt/aws/amazon-cloudwatch-agent/bin/amazon-cloudwatch-agent-ctl \
+  -a fetch-config \
+  -m ec2 \
+  -s \
+  -c file:/opt/aws/amazon-cloudwatch-agent/etc/amazon-cloudwatch-agent.json
+
+# Create a script to fetch secrets and set environment variables
+cat > /opt/todo-app/fetch-secrets.sh <<'SECRETEOF'
+#!/bin/bash
+set -euo pipefail
+
+# Fetch DB password from Secrets Manager
+SECRET_ARN="${db_secret_arn}"
+if [ -n "$SECRET_ARN" ]; then
+  SECRET_VALUE=$(aws secretsmanager get-secret-value --secret-id "$SECRET_ARN" --region us-east-1 --query SecretString --output text)
+  DB_PASSWORD=$(echo "$SECRET_VALUE" | jq -r .password)
+  # Write to file to avoid special char issues
+  printf '%s\n' "$DB_PASSWORD" > /tmp/db_password.txt
+  chmod 600 /tmp/db_password.txt
+  echo "Successfully fetched DB password from Secrets Manager"
+else
+  echo "DB_SECRET_ARN not set"
+  exit 1
+fi
+SECRETEOF
+
+chmod +x /opt/todo-app/fetch-secrets.sh
+chown ec2-user:ec2-user /opt/todo-app/fetch-secrets.sh
+
+# Create systemd service for the application
+cat > /etc/systemd/system/todo-app.service <<'SVCDEOF'
+[Unit]
+Description=Todo App Docker Compose
+Requires=docker.service
+After=docker.service network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+WorkingDirectory=/opt/todo-app
+ExecStartPre=/opt/todo-app/fetch-secrets.sh
+ExecStart=/bin/bash -c 'source /tmp/db_password.txt && export DB_USER=todo_user && export DB_NAME=todo_app_aws_ec2_db && export DB_PASSWORD=$(cat /tmp/db_password.txt) && export REACT_APP_API_URL=/api && export ECR_REPOSITORY=${ecr_repository_id} && docker compose -f docker-compose.prod.yml up -d --remove-orphans'
+ExecStop=/bin/bash -c 'cd /opt/todo-app && docker compose -f docker-compose.prod.yml down'
+User=ec2-user
+Group=ec2-user
+Environment=ECR_REPOSITORY_ID=${ecr_repository_id}
+Environment=DB_SECRET_ARN=${db_secret_arn}
+
+[Install]
+WantedBy=multi-user.target
+SVCDEOF
+
+# Enable the service (will start on boot, but we don't start it now - CI/CD will deploy)
+systemctl daemon-reload
+systemctl enable todo-app.service
+
+echo "=== User-data script completed at $(date) ==="

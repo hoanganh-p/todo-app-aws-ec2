@@ -14,10 +14,11 @@ permissions:
 
 env:
   AWS_REGION: us-east-1
+  TF_VERSION: '1.9.5'
 
 jobs:
   destroy:
-    name: Destroy CDK Stack
+    name: Destroy Terraform Infrastructure
     if: github.event.inputs.confirm == 'DESTROY'
     runs-on: ubuntu-latest
     steps:
@@ -30,32 +31,15 @@ jobs:
           role-to-assume: arn:aws:iam::262232992721:role/GitHubActionsDeployRole
           aws-region: ${{ env.AWS_REGION }}
 
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
         with:
-          node-version: '20'
-          cache: 'npm'
-          cache-dependency-path: infrastructure/package-lock.json
+          terraform_version: ${{ env.TF_VERSION }}
 
-      - name: Install CDK dependencies
-        working-directory: ./infrastructure
-        run: npm ci
+      - name: Terraform Init
+        working-directory: ./terraform
+        run: terraform init
 
-      - name: Build TypeScript
-        working-directory: ./infrastructure
-        run: npm run build
-
-      - name: CDK Destroy
-        working-directory: ./infrastructure
-        run: npx cdk destroy --force
-        env:
-          CDK_DEFAULT_ACCOUNT: 262232992721
-          CDK_DEFAULT_REGION: us-east-1
-
-      - name: Clean up ECR images (optional)
-        run: |
-          aws ecr describe-repositories --repository-names todo-app-backend todo-app-frontend --region ${{ env.AWS_REGION }} 2>/dev/null && \
-          aws ecr batch-delete-image --repository-name todo-app-backend --image-ids $(aws ecr list-images --repository-name todo-app-backend --query 'imageIds[*]' --output json) --region ${{ env.AWS_REGION }} && \
-          aws ecr batch-delete-image --repository-name todo-app-frontend --image-ids $(aws ecr list-images --repository-name todo-app-frontend --query 'imageIds[*]' --output json) --region ${{ env.AWS_REGION }} && \
-          aws ecr delete-repository --repository-name todo-app-backend --force --region ${{ env.AWS_REGION }} && \
-          aws ecr delete-repository --repository-name todo-app-frontend --force --region ${{ env.AWS_REGION }} || echo "ECR repos not found or already deleted"
+      - name: Terraform Destroy
+        working-directory: ./terraform
+        run: terraform destroy -var="key_pair_name=${{ vars.KEY_PAIR_NAME }}" -auto-approve
