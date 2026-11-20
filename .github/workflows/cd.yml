@@ -57,7 +57,7 @@ jobs:
 
       - name: CDK Bootstrap
         working-directory: ./infrastructure
-        run: npx cdk bootstrap --cloudformation-execution-policies arn:aws:iam::262232992721:policy/AdministratorAccess
+        run: npx cdk bootstrap
 
       - name: CDK Diff
         working-directory: ./infrastructure
