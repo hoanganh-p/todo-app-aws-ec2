@@ -120,11 +120,18 @@ jobs:
           envs: ECR_REPOSITORY
           script: |
             cd /opt/todo-app
-            git pull origin main || echo "First deploy, skipping git pull"
+            # Clone repo on first deploy
+            if [ ! -d .git ]; then
+              git clone https://github.com/hoanganh-p/todo-app-aws-ec2.git .
+            else
+              git pull origin main
+            fi
 
+            # Write password to file to avoid special char issues
+            printf '%s\n' '${{ steps.get-secret.outputs.db_password }}' > /tmp/db_password.txt
             export DB_USER=todo_user
             export DB_NAME=todo_app_aws_ec2_db
-            export DB_PASSWORD=${{ steps.get-secret.outputs.db_password }}
+            export DB_PASSWORD=$(cat /tmp/db_password.txt)
             export REACT_APP_API_URL=/api
             export ECR_REPOSITORY=${{ vars.ECR_REPOSITORY }}
 
